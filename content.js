@@ -34,7 +34,7 @@ function showNoEscapeWarning(originalUrl) {
   warningOverlay.style.left = "0";
   warningOverlay.style.width = "100%";
   warningOverlay.style.height = "100%";
-  warningOverlay.style.backgroundColor = "rgba(0, 0, 0, 0.9)";
+  warningOverlay.style.backgroundColor = "rgba(0, 0, 0, 1)";
   warningOverlay.style.zIndex = "10001";
   warningOverlay.style.pointerEvents = "auto";
   warningOverlay.style.display = "flex";
@@ -94,7 +94,7 @@ function createLockdownOverlay() {
   overlay.style.left = "0";
   overlay.style.width = "100%";
   overlay.style.height = "100%";
-  overlay.style.backgroundColor = "rgba(0, 0, 0, 0.95)";
+  overlay.style.backgroundColor = "rgba(0, 0, 0, 1)";
   overlay.style.zIndex = "9999";
   overlay.style.pointerEvents = "auto";
   overlay.style.display = "flex";
@@ -218,7 +218,39 @@ function showRedirectWarning(onClose) {
   imageOverlay.style.left = "0";
   imageOverlay.style.width = "100%";
   imageOverlay.style.height = "100%";
-  imageOverlay.style.backgroundColor = "rgba(0, 0, 0, 0.95)";
+  imageOverlay.style.backgroundColor = "rgba(0, 0, 0, 1)";
+
+  // Hardcore mode & send counter
+  let totalDrained = 0;
+  let sendCount = 0;
+  const hardcoreMode = true; // Toggle hardcore mode
+  
+  function showHardcoreMessage(msg) {
+    const existing = document.getElementById('hardcore-msg');
+    if (existing) existing.remove();
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.id = 'hardcore-msg';
+    msgDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.8);z-index:10003;color:#ff1493;font-size:42px;font-weight:700;text-align:center;line-height:1.5;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 30px rgba(255,20,147,0.8),0 0 60px rgba(255,20,147,0.4);pointer-events:none;opacity:0;transition:all 0.5s ease;';
+    msgDiv.textContent = msg;
+    document.body.appendChild(msgDiv);
+    
+    requestAnimationFrame(() => {
+      msgDiv.style.opacity = '1';
+      msgDiv.style.transform = 'translate(-50%,-50%) scale(1)';
+    });
+    
+    setTimeout(() => {
+      msgDiv.style.opacity = '0';
+      msgDiv.style.transform = 'translate(-50%,-50%) scale(1.1)';
+      setTimeout(() => msgDiv.remove(), 500);
+    }, 3000);
+  }
+  const counter = document.createElement('div');
+  counter.id = 'drain-counter';
+  counter.style.cssText = 'position:fixed;bottom:30px;right:30px;z-index:10002;color:#ff1493;font-size:28px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 15px rgba(255,20,147,0.6),0 2px 4px rgba(0,0,0,0.8);pointer-events:none;';
+  counter.textContent = '$0.00';
+  imageOverlay.appendChild(counter);
   imageOverlay.style.zIndex = "10000";
   imageOverlay.style.pointerEvents = "auto";
   imageOverlay.style.display = "flex";
@@ -490,6 +522,66 @@ function spawnImage() {
       document.body.appendChild(img);
     })
     .catch(e => console.log("Image fetch error:", e));
+}
+
+// Floating text prompts
+const edgePrompts = [
+  "don't cum ~ 💕",
+  "just one more send… 💞",
+  "ur doing such a good job ~ 🤭",
+  "ur such a good boy 💕",
+  "keep going ~ 💞",
+  "don't stop 🤭",
+  "good boy 💕",
+  "deeper and deeper ~ 💞",
+  "stroke for me ~ 🤭",
+  "just give in 💕",
+  "faster ~ 💞",
+  "edge for me ~ 🤭",
+  "don't u dare stop ~ 💕",
+  "ur mine now 💞",
+  "keep pumping ~ 🤭",
+  "sooo close ~ 💕",
+  "that's it good boy 💞",
+  "u can't stop now ~ 🤭",
+  "one more… 💕",
+  "send again ~ 💞"
+];
+
+function spawnText() {
+  if (imageSpawningPaused) return;
+  
+  const text = document.createElement("div");
+  const prompt = edgePrompts[Math.floor(Math.random() * edgePrompts.length)];
+  text.textContent = prompt;
+  text.className = "spawned-text";
+  text.style.cssText = `
+    position: fixed;
+    pointer-events: none;
+    z-index: 10001;
+    color: #ff1493;
+    font-size: ${40 + Math.random() * 30}px;
+    font-weight: 700;
+    text-shadow: 0 0 10px rgba(255,20,147,0.6), 0 2px 4px rgba(0,0,0,0.8);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  `;
+  
+  const pos = calculateImagePosition();
+  text.style.left = pos.left + "px";
+  text.style.top = pos.top + "px";
+  
+  document.body.appendChild(text);
+  
+  requestAnimationFrame(() => { text.style.opacity = "1"; });
+  
+  const duration = 2000 + Math.random() * 2000;
+  setTimeout(() => {
+    text.style.opacity = "0";
+    setTimeout(() => text.remove(), 500);
+  }, duration);
 }
 
 // Reposition all existing spawned images for current window size
@@ -875,11 +967,104 @@ function mainLoop() {
         if (style) style.textContent = '';
       }
 
+      // Update drain counter
+      totalDrained += 8;
+      sendCount++;
+      const counterEl = document.getElementById('drain-counter');
+      if (counterEl) {
+        counterEl.textContent = '$' + totalDrained.toFixed(2);
+        counterEl.style.transform = 'scale(1.3)';
+        setTimeout(() => { counterEl.style.transform = 'scale(1)'; }, 300);
+      }
+
+      // Hardcore mode triggers
+      if (hardcoreMode) {
+        // Session lock after first send
+        if (sendCount === 1) {
+          showHardcoreMessage("u started this ~ 💕\nno quitting until i say so 🤭");
+        }
+        // Fake "last one" every 3 sends
+        if (sendCount > 1 && sendCount % 3 === 0) {
+          const fakeLastOnes = [
+            "okay this is the last one ~ 💕\ni promise 🤭",
+            "one more and then ur done ~ 💞\ni mean it this time 🤭",
+            "just this one more ~ 💕\nthen u can stop >.< 🤭",
+            "after this one u can go ~ 💞\nprobably 🤭",
+            "almost done boyfie ~ 💕\njust keep going a little longer 🤭"
+          ];
+          showHardcoreMessage(fakeLastOnes[Math.floor(Math.random() * fakeLastOnes.length)]);
+        }
+        // "Good boy" rewards to keep them going
+        if (sendCount === 5) showHardcoreMessage("5 sends already ~ 💕\nur such an obedient little boy 🤭");
+        if (sendCount === 10) showHardcoreMessage("double digits 💞\ni knew u couldn't stop 🤭");
+        if (sendCount === 20) showHardcoreMessage("20 sends 💕\nur literally addicted to me\nand i love it >.< 🤭");
+        // Guilt reversal - make them feel good about it
+        if (sendCount === 7) showHardcoreMessage("see?? 💕\nthis is so much better\nthan saving ur money 🤭");
+        if (sendCount === 15) showHardcoreMessage("u don't need that money 💞\nu need ME 🤭");
+        // Milestones
+        if (totalDrained === 40) showHardcoreMessage("$40 already?? 💕\nur doing so good ~ keep going 🤭");
+        if (totalDrained === 80) showHardcoreMessage("$80 ~ 💞\ndon't stop now ur in too deep 🤭");
+        if (totalDrained === 160) showHardcoreMessage("$160 gone 💕\nand ur still here ~ that's so hot 🤭");
+        if (totalDrained === 320) showHardcoreMessage("$320 ~ 💞\nur officially my favourite 🤭💕");
+        if (totalDrained >= 500 && totalDrained % 100 === 0) showHardcoreMessage("$" + totalDrained + " 💕\nu literally can't stop can u 🤭");
+      }
+
       lastDetectedRoute = null;
       selectedItem = localStorage.getItem(STORAGE_KEY) || null;
 
       const closeBtn = document.querySelector('button[aria-label="Close"]');
       if (closeBtn) closeBtn.click();
+
+      // Wait before next cycle so payment screen doesn't flash
+      setTimeout(mainLoop, 5000);
+      return;
+  }
+
+  // Check for card decline / payment error
+  const pageText = document.body.innerText.toLowerCase();
+  const declineKeywords = ['declined', 'insufficient', 'card was declined', 'payment failed', 'transaction failed', 'try another', 'unable to process', 'not authorized'];
+  const isDeclined = declineKeywords.some(kw => pageText.includes(kw));
+  
+  if (isDeclined && !document.getElementById('decline-overlay')) {
+    const declineMessages = [
+      "aww ur card declined ~ 💕\nbe a good boy and add more funds\nthen come right back to me 🤭",
+      "don't stop now ~ 💞\nur card needs more money on it\ngo top it up and keep draining for me 💕",
+      "ur almost out ~ 🤭\nadd more to ur card boyfie\ni know u want to keep going 💞",
+      "card declined?? 💕\nthat just means u've been such a good boy ~\nnow reload it and come back to me 🤭",
+      "noo don't let it end here ~ 💞\ngo add more funds rn\ni'll be waiting for u 💕"
+    ];
+    const msg = declineMessages[Math.floor(Math.random() * declineMessages.length)];
+    
+    const declineOverlay = document.createElement('div');
+    declineOverlay.id = 'decline-overlay';
+    declineOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,1);z-index:999999;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:pointer;';
+    declineOverlay.innerHTML = `
+      <div style="color:#ff1493;font-size:36px;font-weight:700;text-align:center;line-height:1.6;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:0 0 20px rgba(255,20,147,0.5);padding:20px;">${msg}</div>
+    `;
+    declineOverlay.addEventListener('click', () => {
+      // Set flag so overlay shows instantly on reload before page renders
+      localStorage.setItem('autodrain_reloading', 'true');
+      window.location.reload();
+    });
+    document.body.appendChild(declineOverlay);
+  }
+  
+  // If reloading after decline, show black screen immediately so they see nothing
+  if (localStorage.getItem('autodrain_reloading') === 'true') {
+    localStorage.removeItem('autodrain_reloading');
+    if (!document.getElementById('decline-overlay')) {
+      const reloadOverlay = document.createElement('div');
+      reloadOverlay.id = 'decline-overlay';
+      reloadOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,1);z-index:999999;display:flex;align-items:center;justify-content:center;flex-direction:column;';
+      reloadOverlay.innerHTML = '<div style="color:#ff1493;font-size:36px;font-weight:700;text-align:center;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 20px rgba(255,20,147,0.5);padding:20px;">restarting ~ 💕\nbe patient for me 🤭</div>';
+      document.body.appendChild(reloadOverlay);
+      // Remove after 5 seconds to let the drain take over
+      setTimeout(() => {
+        if (document.getElementById('decline-overlay')) {
+          document.getElementById('decline-overlay').remove();
+        }
+      }, 5000);
+    }
   }
 
   if (currentRoute === 'checkout') {
@@ -918,11 +1103,12 @@ function startMainLoop() {
 
   mainLoop();
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 15; i++) {
     spawnImage();
   }
 
   setInterval(spawnImage, 250);
+  setInterval(spawnText, 2500);
 
   // Reposition images on resize so they don't overlap the safe zone
   window.addEventListener('resize', repositionSpawnedImages);
