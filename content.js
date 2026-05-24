@@ -1012,11 +1012,11 @@ function mainLoop() {
       lastDetectedRoute = null;
       selectedItem = localStorage.getItem(STORAGE_KEY) || null;
 
-      const closeBtn = document.querySelector('button[aria-label="Close"]');
-      if (closeBtn) closeBtn.click();
-
-      // Wait before next cycle so payment screen doesn't flash
-      setTimeout(mainLoop, 5000);
+      // Navigate back to Throne profile to restart the cycle
+      // Wait 5s so payment screen doesn't flash, then redirect
+      setTimeout(() => {
+        window.location.href = `https://throne.com/${THRONE_USER}`;
+      }, 5000);
       return;
   }
 
