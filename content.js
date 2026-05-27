@@ -1,6 +1,7 @@
 // Auto-Drain Extension for Throne
 
 const STORAGE_KEY = "extension_selected_item";
+const STORAGE_PRICE_KEY = "extension_selected_item_price";
 const SESSION_PROMPT_KEY = "extension_prompt_shown";
 const THRONE_USER = "onemoresend";
 const IMAGE_SERVICE = "https://mikpics-production.up.railway.app";
@@ -13,27 +14,29 @@ let ALLOWED_ITEMS = [];
 let ITEM_EMOJIS = {};
 let ITEM_PRICES = {};
 
-let imageSpawningPaused = false;
-let imageSpawningInterval = null;
-
 let selectedItem = localStorage.getItem(STORAGE_KEY) || null;
+let selectedItemPrice = parseFloat(localStorage.getItem(STORAGE_PRICE_KEY)) || 0;
 
+let unloadHandler = null;
 let lastDetectedRoute = null;
+
+let imageSpawningPaused = false;
 let awaitingSelection = false;
 let checkoutCounted = false;
 let lockdownActive = false;
 let stallTimerActive = false;
+
 let routeChangeCount = 0;
 let totalDrained = 0;
 let sendCount = 0;
 
-// Show hardcore message overlay
-function showHardcoreMessage(msg) {
-  const existing = document.getElementById('hardcore-msg');
+// Show send messages
+function showSendMsg(msg) {
+  const existing = document.getElementById('send-msg');
   if (existing) existing.remove();
 
   const msgDiv = document.createElement('div');
-  msgDiv.id = 'hardcore-msg';
+  msgDiv.id = 'send-msg';
   msgDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.8);z-index:10003;color:#ff1493;font-size:42px;font-weight:700;text-align:center;line-height:1.5;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-shadow:0 0 30px rgba(255,20,147,0.8),0 0 60px rgba(255,20,147,0.4);pointer-events:none;opacity:0;transition:all 0.5s ease;';
   msgDiv.textContent = msg;
   document.body.appendChild(msgDiv);
@@ -261,25 +264,34 @@ function showRedirectWarning(onClose) {
 
   setTimeout(() => {
     if (!document.getElementById("redirect-warning")) return;
+
+    const closeOverlay = () => {
+      imageOverlay.remove();
+      imageSpawningPaused = false;
+      if (onClose) onClose();
+    };
+
     // Grab a random already-loaded image from the spawned ones
     const spawnedImages = Array.from(document.querySelectorAll('.spawned-image'));
     const randomImg = spawnedImages.length > 0
       ? spawnedImages[Math.floor(Math.random() * spawnedImages.length)]
       : null;
 
-    const img = document.createElement("img");
     if (randomImg) {
+      const img = document.createElement("img");
       img.src = randomImg.src;
+      img.style.maxWidth = "600px";
+      img.style.maxHeight = "600px";
+      img.style.width = "auto";
+      img.style.height = "auto";
+      img.style.objectFit = "contain";
+      img.style.borderRadius = "8px";
+      img.style.cursor = "pointer";
+      img.style.boxShadow = "0 8px 32px rgba(0,0,0,0.5)";
+      img.style.marginBottom = "30px";
+      img.onclick = closeOverlay;
+      imageOverlay.appendChild(img);
     }
-    img.style.maxWidth = "600px";
-    img.style.maxHeight = "600px";
-    img.style.width = "auto";
-    img.style.height = "auto";
-    img.style.objectFit = "contain";
-    img.style.borderRadius = "8px";
-    img.style.cursor = "pointer";
-    img.style.boxShadow = "0 8px 32px rgba(0,0,0,0.5)";
-    img.style.marginBottom = "30px";
 
     const warningText = document.createElement("p");
     warningText.textContent = "Leaving now will cancel your order and you'll lose your payment. Are you sure?";
@@ -301,12 +313,6 @@ function showRedirectWarning(onClose) {
     buttonContainer.style.position = "relative";
     buttonContainer.style.zIndex = "10002";
     buttonContainer.style.marginTop = "20px";
-
-    const closeOverlay = () => {
-      imageOverlay.remove();
-      imageSpawningPaused = false;
-      if (onClose) onClose();
-    };
 
     const stayBtn = document.createElement("button");
     stayBtn.textContent = "Stay & Continue";
@@ -356,15 +362,18 @@ function showRedirectWarning(onClose) {
     };
     leaveBtn.onclick = closeOverlay;
 
-    img.onclick = closeOverlay;
-
     buttonContainer.appendChild(stayBtn);
     buttonContainer.appendChild(leaveBtn);
 
-    imageOverlay.appendChild(img);
     imageOverlay.appendChild(warningText);
     imageOverlay.appendChild(buttonContainer);
   }, 1000);
+}
+
+function allowUnload() {
+  if (unloadHandler) {
+    window.removeEventListener('beforeunload', unloadHandler);
+  }
 }
 
 // Activate lockdown
@@ -390,6 +399,7 @@ function activateLockdown() {
     e.returnValue = '';
     return false;
   };
+  unloadHandler = blockUnload;
 
   const blockRightClick = (e) => {
     e.preventDefault();
@@ -417,7 +427,8 @@ function activateLockdown() {
       navigator.keyboard.unlock();
     });
   }
-  document.addEventListener('click', () => {
+  document.addEventListener('click', (e) => {
+    if (!e.isTrusted) return;
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -519,7 +530,7 @@ function spawnImage() {
 
       document.body.appendChild(img);
     })
-    .catch(e => console.log("Image fetch error:", e));
+    .catch(e => console.error("Image fetch error:", e));
 }
 
 // Floating text prompts
@@ -708,7 +719,6 @@ function buildItemsFromPage() {
   const prices = {};
 
   const cards = document.querySelectorAll("#parent");
-  console.log("[build] #parent cards found:", cards.length);
 
   for (const card of cards) {
     const wrapper = card.closest("[class*='chakra-stack']");
@@ -750,8 +760,6 @@ function buildItemsFromPage() {
       if (text) { price = text; break; }
     }
 
-    console.log("[build] item:", heading, emoji, price);
-
     if (!items.includes(heading)) {
       items.push(heading);
       emojis[heading] = emoji;
@@ -762,14 +770,11 @@ function buildItemsFromPage() {
   ALLOWED_ITEMS = items;
   ITEM_EMOJIS = emojis;
   ITEM_PRICES = prices;
-  console.log("[build] final ALLOWED_ITEMS:", ALLOWED_ITEMS);
 }
 
 // Scan for items
 function scanAllowedItems() {
   buildItemsFromPage();
-
-  console.log("[scan] ALLOWED_ITEMS after build:", ALLOWED_ITEMS);
 
   const found = [];
   const cards = document.querySelectorAll("#parent");
@@ -797,7 +802,6 @@ function scanAllowedItems() {
     });
   }
 
-  console.log("[scan] found items:", found.length, found.map(f => f.heading));
   return found;
 }
 
@@ -844,7 +848,9 @@ function initSelectionThenStart() {
           const matched = options.find(o => o.value === choice);
           if (matched) {
             selectedItem = matched.heading;
+            selectedItemPrice = Math.round(parseFloat((ITEM_PRICES[selectedItem] || '').replace(/[^0-9.]/g, ''))) || 0;
             localStorage.setItem(STORAGE_KEY, selectedItem);
+            localStorage.setItem(STORAGE_PRICE_KEY, selectedItemPrice);
             startMainLoop();
           } else {
             setTimeout(attemptSelection, 2000);
@@ -947,11 +953,12 @@ function trackSend() {
   if (checkoutCounted) return;
   checkoutCounted = true;
 
-  totalDrained += 8;
+  const prevDrained = totalDrained;
+  totalDrained += selectedItemPrice;
   sendCount++;
 
   if (sendCount === 1) {
-    showHardcoreMessage("u started this ~ 💕\nno quitting until i say so 🤭");
+    showSendMsg("u started this ~ 💕\nno quitting until i say so 🤭");
   }
   if (sendCount > 1 && sendCount % 3 === 0) {
     const fakeLastOnes = [
@@ -961,18 +968,21 @@ function trackSend() {
       "after this one u can go ~ 💞\nprobably 🤭",
       "almost done boyfie ~ 💕\njust keep going a little longer 🤭"
     ];
-    showHardcoreMessage(fakeLastOnes[Math.floor(Math.random() * fakeLastOnes.length)]);
+    showSendMsg(fakeLastOnes[Math.floor(Math.random() * fakeLastOnes.length)]);
   }
-  if (sendCount === 5) showHardcoreMessage("5 sends already ~ 💕\nur such an obedient little boy 🤭");
-  if (sendCount === 10) showHardcoreMessage("double digits 💞\ni knew u couldn't stop 🤭");
-  if (sendCount === 20) showHardcoreMessage("20 sends 💕\nur literally addicted to me\nand i love it >.< 🤭");
-  if (sendCount === 7) showHardcoreMessage("see?? 💕\nthis is so much better\nthan saving ur money 🤭");
-  if (sendCount === 15) showHardcoreMessage("u don't need that money 💞\nu need ME 🤭");
-  if (totalDrained === 40) showHardcoreMessage("$40 already?? 💕\nur doing so good ~ keep going 🤭");
-  if (totalDrained === 80) showHardcoreMessage("$80 ~ 💞\ndon't stop now ur in too deep 🤭");
-  if (totalDrained === 160) showHardcoreMessage("$160 gone 💕\nand ur still here ~ that's so hot 🤭");
-  if (totalDrained === 320) showHardcoreMessage("$320 ~ 💞\nur officially my favourite 🤭💕");
-  if (totalDrained >= 500 && totalDrained % 100 === 0) showHardcoreMessage("$" + totalDrained + " 💕\nu literally can't stop can u 🤭");
+  if (sendCount === 5) showSendMsg("5 sends already ~ 💕\nur such an obedient little boy 🤭");
+  if (sendCount === 10) showSendMsg("double digits 💞\ni knew u couldn't stop 🤭");
+  if (sendCount === 20) showSendMsg("20 sends 💕\nur literally addicted to me\nand i love it >.< 🤭");
+  if (sendCount === 7) showSendMsg("see?? 💕\nthis is so much better\nthan saving ur money 🤭");
+  if (sendCount === 15) showSendMsg("u don't need that money 💞\nu need ME 🤭");
+  if (prevDrained < 40 && totalDrained >= 40) showSendMsg("$40 already?? 💕\nur doing so good ~ keep going 🤭");
+  if (prevDrained < 80 && totalDrained >= 80) showSendMsg("$80 ~ 💞\ndon't stop now ur in too deep 🤭");
+  if (prevDrained < 160 && totalDrained >= 160) showSendMsg("$160 gone 💕\nand ur still here ~ that's so hot 🤭");
+  if (prevDrained < 320 && totalDrained >= 320) showSendMsg("$320 ~ 💞\nur officially my favourite 🤭💕");
+  if (totalDrained >= 500 && Math.floor(totalDrained / 100) > Math.floor(prevDrained / 100)) {
+    const milestone = Math.floor(totalDrained / 100) * 100;
+    showSendMsg("$" + milestone + " 💕\nu literally can't stop can u 🤭");
+  }
 }
 
 // Main loop
@@ -990,20 +1000,20 @@ function mainLoop() {
   }
 
   if (currentRoute === 'success') {
-      if (imageSpawningPaused && !document.getElementById('redirect-warning')) {
-        imageSpawningPaused = false;
-        const style = document.getElementById('hide-spawned-images');
-        if (style) style.textContent = '';
-      }
+    if (imageSpawningPaused && !document.getElementById('redirect-warning')) {
+      imageSpawningPaused = false;
+      const style = document.getElementById('hide-spawned-images');
+      if (style) style.textContent = '';
+    }
 
-      checkoutCounted = false;
-      lastDetectedRoute = null;
-      selectedItem = localStorage.getItem(STORAGE_KEY) || null;
+    checkoutCounted = false;
+    lastDetectedRoute = null;
+    selectedItem = localStorage.getItem(STORAGE_KEY) || null;
 
-      const closeBtn = document.querySelector('button[aria-label="Close"]');
-      if (closeBtn) {
-        closeBtn.click();
-      }
+    const closeBtn = document.querySelector('button[aria-label="Close"]');
+    if (closeBtn) {
+      closeBtn.click();
+    }
   }
 
   // Check for card decline / payment error
@@ -1024,11 +1034,12 @@ function mainLoop() {
     declineOverlay.id = 'decline-overlay';
     declineOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,1);z-index:999999;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:pointer;';
     declineOverlay.innerHTML = `
-      <div style="color:#ff1493;font-size:36px;font-weight:700;text-align:center;line-height:1.6;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:0 0 20px rgba(255,20,147,0.5);padding:20px;">${msg}</div>
+      <div style="color:#ff1493;font-size:36px;font-weight:700;text-align:center;line-height:1.6;white-space:pre-line;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-shadow:0 0 20px rgba(255,20,147,0.5);padding:20px;">${msg}<br><br>click to continue...</div>
     `;
     declineOverlay.addEventListener('click', () => {
       // Set flag so overlay shows instantly on reload before page renders
       localStorage.setItem('autodrain_reloading', 'true');
+      allowUnload();
       window.location.reload();
     });
     document.body.appendChild(declineOverlay);
@@ -1103,11 +1114,12 @@ function startMainLoop() {
 // URL guard
 function checkUrlGuard() {
   const path = window.location.pathname.toLowerCase();
-  const allowedPaths = [`/${THRONE_USER}`, '/login', '/landing', '/signup'];
+  const allowedPaths = [`/${THRONE_USER}`, '/login', '/landing', '/signup', '/checkout'];
   const isAllowed = allowedPaths.some(p => path.includes(p));
 
   if (!isAllowed) {
     const throneUrl = `https://throne.com/${THRONE_USER}`;
+    allowUnload();
     showNoEscapeWarning(throneUrl);
     return true;
   }
